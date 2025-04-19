@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ค้นหาข้อมูลผู้โชคดี</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: sans-serif;
+      background: #e0f7fa;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    #container {
+      width: 100%;
+      max-width: 500px;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    input, button {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      margin: 8px 0;
+    }
+    #resultsWrapper {
+      max-height: 40vh;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      padding: 10px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <h2 style="text-align:center;">ค้นหาข้อมูลผู้โชคดี</h2>
+    <input id="search" placeholder="กรอกชื่อหรือเลขบัตรประชาชน" />
+    <button onclick="filterData()">ค้นหา</button>
+    <div id="resultCount" style="color:blue; text-align:center;"></div>
+    <div id="resultsWrapper"><div id="results"></div></div>
+  </div>
+
+  <script>
+    let allData = [];
+
+    fetch("https://opensheet.elk.sh/1oR3McgNWwwpT8uFKI6KlK8VRxzp10WBZbw8bfiQnw5o/Sheet1")
+      .then(res => res.json())
+      .then(data => { allData = data; });
+
+    function filterData() {
+      const q = document.getElementById("search").value.trim().toLowerCase();
+      const results = allData.filter(row =>
+        (row["เลขประจำตัวประชาชน"] || "").toLowerCase().includes(q) ||
+        (row["ชื่อ-สกุล"] || "").toLowerCase().includes(q)
+      );
+      const resultDiv = document.getElementById("results");
+      const countDiv = document.getElementById("resultCount");
+
+      if (results.length === 0) {
+        countDiv.innerHTML = "";
+        resultDiv.innerHTML = "<p style='color:red; text-align:center;'>ไม่พบข้อมูล</p>";
+        return;
+      }
+
+      countDiv.innerHTML = `พบ <b>${results.length}</b> รายการ`;
+      resultDiv.innerHTML = results.map((row, i) => `
+        <div style="padding:10px; border-bottom:1px solid #ccc;">
+          <b style="color:red;">ลำดับ ${i+1}</b><br>
+          <b>ชื่อ:</b> ${row["ชื่อ-สกุล"] || "-"}<br>
+          <b>เลขบัตร:</b> ${row["เลขประจำตัวประชาชน"] || "-"}
+        </div>
+      `).join("");
+    }
+  </script>
+</body>
+</html>
