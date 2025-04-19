@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="th">
 <head>
@@ -28,7 +29,7 @@
       width: 100%;
       padding: 12px;
       font-size: 16px;
-      margin: 8px 0;
+      margin-bottom: 10px;
     }
     #resultsWrapper {
       max-height: 40vh;
@@ -36,6 +37,11 @@
       border: 1px solid #ccc;
       padding: 10px;
       margin-top: 10px;
+      border-radius: 6px;
+    }
+    .no-data {
+      color: red;
+      text-align: center;
     }
   </style>
 </head>
@@ -44,6 +50,7 @@
     <h2 style="text-align:center;">ค้นหาข้อมูลผู้โชคดี</h2>
     <input id="search" placeholder="กรอกชื่อหรือเลขบัตรประชาชน" />
     <button onclick="filterData()">ค้นหา</button>
+    <button onclick="resetSearch()">รีเซ็ต</button>
     <div id="resultCount" style="color:blue; text-align:center;"></div>
     <div id="resultsWrapper"><div id="results"></div></div>
   </div>
@@ -57,21 +64,22 @@
 
     function filterData() {
       const q = document.getElementById("search").value.trim().toLowerCase();
-      const results = allData.filter(row =>
+      const filtered = allData.filter(row =>
         (row["เลขประจำตัวประชาชน"] || "").toLowerCase().includes(q) ||
         (row["ชื่อ-สกุล"] || "").toLowerCase().includes(q)
       );
+
       const resultDiv = document.getElementById("results");
       const countDiv = document.getElementById("resultCount");
 
-      if (results.length === 0) {
+      if (filtered.length === 0) {
         countDiv.innerHTML = "";
-        resultDiv.innerHTML = "<p style='color:red; text-align:center;'>ไม่พบข้อมูล</p>";
+        resultDiv.innerHTML = "<p class='no-data'>ไม่พบข้อมูลที่ตรงกับคำค้นหา</p>";
         return;
       }
 
-      countDiv.innerHTML = `พบ <b>${results.length}</b> รายการ`;
-      resultDiv.innerHTML = results.map((row, i) => `
+      countDiv.innerHTML = `พบ <b>${filtered.length}</b> รายการ`;
+      resultDiv.innerHTML = filtered.map((row, i) => `
         <div style="padding:10px; border-bottom:1px solid #ccc;">
           <b style="color:red;">ลำดับ ${i+1}</b><br>
           <b>ชื่อ:</b> ${row["ชื่อ-สกุล"] || "-"}<br>
@@ -79,6 +87,19 @@
         </div>
       `).join("");
     }
+
+    function resetSearch() {
+      document.getElementById("search").value = "";
+      document.getElementById("resultCount").innerHTML = "";
+      document.getElementById("results").innerHTML = "";
+    }
+
+    document.getElementById("search").addEventListener("keypress", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        filterData();
+      }
+    });
   </script>
 </body>
 </html>
