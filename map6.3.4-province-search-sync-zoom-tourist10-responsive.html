@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+
+<html lang="th">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>แผนที่นักท่องเที่ยว + Dashboard + กราฟ + ตาราง</title>
+<link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js">
+document.getElementById('agencyInput').addEventListener('keydown', function(event) {
+  if (event.key === 'Enter') {
+    filterData();
+  }
+});
+
+const originalFilterData = filterData;
+filterData = function() {
+  const agencyText = (document.getElementById('agencyInput').value || '').toLowerCase();
+  const startInput = document.getElementById('startDate').value;
+  const endInput = document.getElementById('endDate').value;
+
+  const filtered = allData.filter(row => {
+    const agency = (row['หน่วยบันทึกข้อมูล'] || '').toLowerCase();
+    const matchAgency = agency.includes(agencyText);
+    let matchDate = true;
+    if (startInput && endInput) {
+      const date = new Date(convertThaiDateToISO(row['วดป.ที่ลงพื้นที่']));
+      const start = new Date(startInput);
+      const end = new Date(endInput);
+      matchDate = date >= start && date <= end;
+    }
+    return matchAgency && matchDate;
+  });
+
+  renderMarkers(filtered);
+  updateDashboard(filtered);
+};
+
+const originalResetAll = resetAll;
+resetAll = function() {
+  document.getElementById('startDate').value = '';
+  document.getElementById('endDate').value = '';
+  document.getElementById('searchInput').value = '';
+  document.getElementById('agencyInput').value = '';
+  renderMarkers(allData);
+  updateDashboard(allData);
+  map.flyTo([13.736717, 100.523186], 6, { animate: true, duration: 2 });
+}
+
+</script>
+<style>
+    body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; }
+    #container { display: flex; height: 100vh; }
+    #dashboard { width: 300px; background: #f4f4f4; padding: 10px; overflow-y: auto; box-shadow: 2px 0 8px rgba(0,0,0,0.1); display: flex; flex-direction: column; align-items: center; }
+    #map { flex: 1; }
+    #charts { width: 300px; background: #f9f9f9; padding: 10px; overflow-y: auto; box-shadow: -2px 0 8px rgba(0,0,0,0.1); }
+    .card { background: white; padding: 20px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); text-align: center; }
+    .card h2 { margin: 0; color: #007bff; }
+    .card p { margin: 5px 0 0 0; font-size: 14px; color: #333; }
+    input[type="text"], input[type="date"], button { width: 100%; margin-top: 5px; padding: 8px; }
+    button { background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    canvas { width: 100% !important; height: auto !important; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 5px; text-align: center; }
+    tr:hover { background-color: #e9f5ff; cursor: pointer; }
+    .leaflet-tooltip.my-tooltip {
+      background: rgba(255, 255, 255, 0.8);
+      color: #333;
+      font-weight: bold;
+      border: 1px solid #999;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    @media (max-width: 768px) { #container { flex-direction: column; } #dashboard, #charts { width: 100%; height: auto; } }
+  
+@media (max-width: 1024px) {
+  #container {
+    flex-direction: column;
+  }
+  #dashboard, #charts {
+    width: 100%;
+    height: auto;
+    box-shadow: none;
+  }
+  #dashboard button, #dashboard input[type="text"], #dashboard input[type="date"] {
+    font-size: 16px;
+  }
+  canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+  #map {
+    min-height: 400px;
+  }
+}
+</style>
+<style>
+  input::placeholder {
+    color: #aaa;
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<div id="container">
+<div id="dashboard">
+<div class="card"><h2 id="visitCount">0</h2><p>จำนวนครั้งลงพื้นที่</p></div>
+<div class="card"><h2 id="placeCount">0</h2><p>จำนวนสถานที่ทั้งหมด</p></div>
+<input id="searchInput" placeholder="ค้นหาสถานที่หรือจังหวัด" style="display:block; width: 100%; margin-top: 0px; padding: 8px; font-size: 16px; 
+            color: #333; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;" type="text"/>
+<input id="agencyInput" placeholder="ค้นหาหน่วยบันทึก" style="display:block; width: 100%; margin-top: 5px; padding: 8px; font-size: 16px; 
+            color: #333; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;" type="text"/>
+<input id="startDate" type="date"/>
+<input id="endDate" type="date"/>
+<button onclick="filterData()">กรองข้อมูล</button>
+<button onclick="resetAll()">รีเซ็ตทั้งหมด</button>
+<button onclick="toggleBaseMap()">สลับแผนที่</button>
+<div id="tableContainer"></div>
+</div>
+<div id="map"></div>
+<div id="charts">
+<h2 style="text-align:center">ระดับภัยคุกคาม</h2>
+<canvas id="threatChart"></canvas>
+<style>
+      #threatChart {
+        max-width: 250px;  /* 👈 จำกัดความกว้าง */
+        max-height: 250px; /* 👈 จำกัดความสูง */
+        margin: 0 auto;    /* 👈 จัดให้อยู่ตรงกลาง */
+        display: block;
+      }
+      </style>
+<br/>
+<br/>
+<h2 style="text-align:center">จำนวนนักท่องเที่ยว</h2>
+<canvas id="touristChart"></canvas>
+<br/>
+<br/>
+<h2 style="text-align:center">การลงพื้นที่รายจังหวัด</h2>
+<div id="provinceTableContainer">
+<table id="provinceTable" style="width:100%; border-collapse: collapse;">
+<thead>
+<tr style="background:#f0f0f0;">
+<th style="padding:6px; border:1px solid #ccc;">จังหวัด</th>
+<th style="padding:6px; border:1px solid #ccc;">จำนวนครั้ง</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+<br/>
+<br/>
+<div style="white-space:nowrap; overflow:hidden; box-sizing:border-box;"><span style="display:inline-block; padding-left:100%; animation:marquee 10s linear infinite;">Power by..นายกอง ดินดำ TEEWASIT LEMNUI Div5-SB2</span></div><style>@keyframes marquee{0%{transform:translateX(0);}100%{transform:translateX(-100%);}}</style>
+</div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+document.getElementById('agencyInput').addEventListener('keydown', function(event) {
+  if (event.key === 'Enter') {
+    filterData();
+  }
+});
+
+const originalFilterData = filterData;
+filterData = function() {
+  const agencyText = (document.getElementById('agencyInput').value || '').toLowerCase();
+  const startInput = document.getElementById('startDate').value;
+  const endInput = document.getElementById('endDate').value;
+
+  const filtered = allData.filter(row => {
+    const agency = (row['หน่วยบันทึกข้อมูล'] || '').toLowerCase();
+    const matchAgency = agency.includes(agencyText);
+    let matchDate = true;
+    if (startInput && endInput) {
+      const date = new Date(convertThaiDateToISO(row['วดป.ที่ลงพื้นที่']));
+      const start = new Date(startInput);
+      const end = new Date(endInput);
+      matchDate = date >= start && date <= end;
+    }
+    return matchAgency && matchDate;
+  });
+
+  renderMarkers(filtered);
+  updateDashboard(filtered);
+};
+
+const originalResetAll = resetAll;
+resetAll = function() {
+  document.getElementById('startDate').value = '';
+  document.getElementById('endDate').value = '';
+  document.getElementById('searchInput').value = '';
+  document.getElementById('agencyInput').value = '';
+  renderMarkers(allData);
+  updateDashboard(allData);
+  map.flyTo([13.736717, 100.523186], 6, { animate: true, duration: 2 });
+}
+
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js">
+document.getElementById('agencyInput').addEventListener('keydown', function(event) {
+  if (event.key === 'Enter') {
+    filterData();
+  }
+});
+
+const originalFilterData = filterData;
+filterData = function() {
+  const agencyText = (document.getElementById('agencyInput').value || '').toLowerCase();
+  const startInput = document.getElementById('startDate').value;
+  const endInput = document.getElementById('endDate').value;
+
+  const filtered = allData.filter(row => {
+    const agency = (row['หน่วยบันทึกข้อมูล'] || '').toLowerCase();
+    const matchAgency = agency.includes(agencyText);
+    let matchDate = true;
+    if (startInput && endInput) {
+      const date = new Date(convertThaiDateToISO(row['วดป.ที่ลงพื้นที่']));
+      const start = new Date(startInput);
+      const end = new Date(endInput);
+      matchDate = date >= start && date <= end;
+    }
+    return matchAgency && matchDate;
+  });
+
+  renderMarkers(filtered);
+  updateDashboard(filtered);
+};
+
+const originalResetAll = resetAll;
+resetAll = function() {
+  document.getElementById('startDate').value = '';
+  document.getElementById('endDate').value = '';
+  document.getElementById('searchInput').value = '';
+  document.getElementById('agencyInput').value = '';
+  renderMarkers(allData);
+  updateDashboard(allData);
+  map.flyTo([13.736717, 100.523186], 6, { animate: true, duration: 2 });
+}
+
+</script>
+<script>
+// ✅ พิกัดศูนย์กลางจังหวัด (77 จังหวัด)
+const provinceCenters = {
+  "กรุงเทพมหานคร":[13.7278956,100.524123499999],
+"เมืองกระบี่":[8.0862997,98.9062834999999],
+"กาญจนบุรี":[14.0227797,99.5328114999999],
+"กาฬสินธุ์":[16.4314078,103.5058755],
+"กำแพงเพชร":[16.4827798,99.5226617999999],
+"ขอนแก่น":[16.4419355,102.8359921],
+"จันทบุรี":[12.61134,102.103854599999],
+"ฉะเชิงเทรา":[13.6904194,101.077959599999],
+"ชลบุรี":[13.3611431,100.9846717],
+"ชัยนาท":[15.1851971,100.125125],
+"ชัยภูมิ":[15.8068173,102.0315027],
+"ชุมพร":[10.4930496,99.1800198999999],
+"เชียงราย":[19.9071656,99.830955],
+"เชียงใหม่":[18.7877477,98.9931311],
+"ตรัง":[7.5593851,99.6110065],
+"ตราด":[12.2427563,102.517473399999],
+"ตาก":[16.8839901,99.1258497999999],
+"นครนายก":[14.2069466,101.2130511],
+"นครปฐม":[13.8199206,100.0621676],
+"นครพนม":[17.392039,104.769550799999],
+"นคราชสีมา":[14.9798997,102.097769299999],
+"นครศรีธรรมราช":[8.4303975,99.9631219],
+"นครสวรรค์":[15.6930072,100.122559499999],
+"กรุงเทพฯ":[13.8621125,100.514352799999],
+"นราธิวาส":[6.4254607,101.825314299999],
+"น่าน":[18.7756318,100.7730417],
+"บุรีรัมย์":[14.9930017,103.1029191],
+"ปทุมธานี":[14.0208391,100.525027599999],
+"ประวบคีรีขันธ์":[11.812367,99.7973270999999],
+"ปราจีนบุรี":[14.0509704,101.372743899999],
+"ปัตตานี":[6.86948439999999,101.250482599999],
+"พระนครศรีอยุธยา":[14.3532128,100.568959899999],
+"พะเยา":[19.1664789,99.9019419],
+"พังงา":[8.4407456,98.5193031999999],
+"พัทลุง":[7.6166823,100.074023099999],
+"พิจิตร":[16.4429516,100.348232899999],
+"พิษณุโลก":[16.8298048,100.2614915],
+"เพชรบุรี":[13.1111601,99.9391306999999],
+"เพชรบูรณ์":[16.4189807,101.155092599999],
+"แพร่":[18.1445774,100.1402831],
+"ภูเก็ต":[7.9810496,98.3638823999999],
+"มหาสารคาม":[16.1850896,103.302646099999],
+"มุกดาหาร":[16.542443,104.720915099999],
+"แม่ฮ่องสอน":[19.2990643,97.9656225999999],
+"ยโสธร":[15.792641,104.1452827],
+"ยะลา":[6.541147,101.280394699999],
+"ร้อย":[16.0538196,103.652003599999],
+"ระนอง":[9.9528702,98.6084640999999],
+"ระยอง":[12.6833115,101.237429499999],
+"ราชบุรี":[13.5282893,99.8134211],
+"ลพบุรี":[14.7995081,100.6533706],
+"ลำปาง":[18.2888404,99.4908739999999],
+"ลำพูน":[18.5744606,99.0087221],
+"เลย":[17.4860232,101.7223002],
+"ศรีสะเกษ":[15.1186009,104.322009499999],
+"สกลนคร":[17.1545995,104.1348365],
+"สวีเดน":[7.1756004,100.614346999999],
+"สตูล":[6.6238158,100.0673744],
+"สมุทรปราการ":[13.5990961,100.5998319],
+"สมุทรสงคราม":[13.4098217,100.0022645],
+"สมุทรสาคร":[13.5475216,100.274395599999],
+"เทศบาลเมืองแก้ว":[13.824038,102.0645839],
+"จังหวัดบุรี":[14.5289154,100.9101421],
+"สิงห์บุรี":[14.8936253,100.3967314],
+"สุโขทัย":[17.0055573,99.8263712],
+"สุพรรณบุรี":[14.4744892,100.117712799999],
+"สุราษฎร์ธานี":[9.1382389,99.3217482999999],
+"สุรินทร์":[14.882905,103.4937107],
+"หนองคาย":[17.8782803,102.7412638],
+"หนองบัวลำภู":[17.2218247,102.4260368],
+"อ่างทอง":[14.5896054,100.455052],
+"อำนาจเจริญ":[15.8656783,104.6257774],
+"อุดรธานี":[17.4138413,102.7872325],
+"อุตรดิตถ์":[17.6200886,100.0992942],
+"อุทัยธานี":[15.3835001,100.024552699999],
+"อุบลราชธานี":[15.2286861,104.8564217],
+"บึงกาฬ":[18.3609104,103.646446299999]
+// ... เพิ่มจังหวัดได้อีก
+};
+
+function convertThaiDateToISO(dateStr) {
+  if (!dateStr) return '';
+  const [d, m, y] = dateStr.split('/').map(Number);
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+function formatISOToThaiDate(isoStr) {
+  if (!isoStr) return '';
+  const [y, m, d] = isoStr.split('-');
+  return `${parseInt(d)}/${parseInt(m)}/${y}`;
+}
+
+// ✅ ตัวแปรหลัก
+const map = L.map('map').setView([13.736717, 100.523186], 6);
+let street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+let satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
+let currentBase = 'street';
+let markersLayer = L.layerGroup().addTo(map);
+let allData = [];
+let allMarkers = [];
+let threatChart, touristChart, provinceChart;
+
+// ✅ โหลดข้อมูล
+fetch('https://opensheet.elk.sh/1K-ofsr0X8WA0wr633VjULu8wSojs_pFSQJhez2ASCnI/data_map')
+.then(res => res.json())
+.then(data => { allData = data; renderMarkers(allData); updateDashboard(allData); })
+.catch(err => console.error('Error loading data', err));
+
+// ✅ ฟังก์ชันปักหมุด
+function renderMarkers(data) {
+  markersLayer.clearLayers();
+  allMarkers = [];
+  const grouped = {};
+  data.forEach(row => {
+    const place = row['สถานที่'] || '';
+    if (!grouped[place]) grouped[place] = [];
+    grouped[place].push(row);
+  });
+
+  Object.entries(grouped).forEach(([place, rows]) => {
+    const latest = rows[0];
+    const loc = latest['ดึงสถานที่'];
+    if (loc && loc.includes(",")) {
+      const [lat, lng] = loc.split(",").map(Number);
+      const province = latest['จังหวัด'] || '';
+      const assessBefore = latest['ประเมินก่อนลง'] || '';
+
+      const history = rows.sort((a, b) => {
+        const d1 = new Date(convertThaiDateToISO(b['วดป.ที่ลงพื้นที่']) + 'T' + b['เวลาที่ลงพื้นที่']);
+        const d2 = new Date(convertThaiDateToISO(a['วดป.ที่ลงพื้นที่']) + 'T' + a['เวลาที่ลงพื้นที่']);
+        return d2 - d1;
+      }).map(r => `<div><b style='color:#cc0000;'>${r['วดป.ที่ลงพื้นที่']} ${r['เวลาที่ลงพื้นที่']}</b><br>${r['สถาพโดยทั่วไปของพื้นที่ขณะลงพื้นที่']}</div>`).join('<hr>');
+
+      const popupContent = `
+        <div style="text-align: left; line-height: 1.5; max-height: 300px; overflow-y: auto;">
+          <b style="color:#004080;">สถานที่:</b> ${place}<br>
+          <b style="color:#004080;">จังหวัด:</b> ${province}<br>
+          <b style="color:#004080;">พิกัด:</b> ${loc}<br>
+          <b style="color:#004080;">จำนวนครั้ง:</b> ${rows.length}<br>
+          <b style="color:#004080;">หน่วยรับผิดชอบ:</b> ${latest['หน่วยบันทึกข้อมูล'] || '-'}<br>
+          <b style="color:#004080;">ประเมินก่อนลง:</b> ${latest['ประเมินก่อนลง'] || '-'}<br>
+          <b style="color:#004080;">ประเมินหลังลง:</b> ${latest['ประเมินหลังลง'] || '-'}<br><br>
+          
+<b style="color:#004080;">ภาพรวมสถานที่</b><br>
+${rows.sort((a, b) => {
+  const t1 = new Date(`${convertThaiDateToISO(b['วดป.ที่ลงพื้นที่'])}T${b['เวลาที่ลงพื้นที่'] || '00:00'}`).getTime();
+  const t2 = new Date(`${convertThaiDateToISO(a['วดป.ที่ลงพื้นที่'])}T${a['เวลาที่ลงพื้นที่'] || '00:00'}`).getTime();
+  return t1 - t2;
+}).map(r => `
+  <div style="margin-bottom:10px;">
+    <span style="color:#cc0000;"><b>${r['วดป.ที่ลงพื้นที่']} ${r['เวลาที่ลงพื้นที่']}</b></span><br>
+    <b style="color:#004080;">สภาพโดยทั่วไป:</b> ${r['สถาพโดยทั่วไปของพื้นที่ขณะลงพื้นที่'] || '-'}<br>
+    <b style="color:#004080;">ประเมินภัยคุกคาม:</b> ${r['ประเมินภัยคุกคาม ข้อเสนอแนะ ความคิดเห็นผู้ลงพื้นที่'] || '-'}<br>
+    <hr>
+  </div>
+`).join('')}
+
+        </div>
+      `;
+      const marker = L.circleMarker([lat, lng], {
+        radius: 6,
+        fillColor: assessBefore === 'เขียว' ? 'green' : assessBefore === 'เหลือง' ? 'yellow' : assessBefore === 'แดง' ? 'red' : 'blue',
+        color: '#333', weight: 1, opacity: 1, fillOpacity: 0.8
+      }).bindPopup(popupContent);
+      marker.bindTooltip(place, { permanent: false, direction: 'top', className: 'my-tooltip' });
+      marker.place = place.toLowerCase();
+      marker.province = province.toLowerCase();
+      marker.threat = assessBefore;
+      marker.addTo(markersLayer);
+      allMarkers.push(marker);
+      marker.on('click', () => {
+        const filtered = allData.filter(r => (r['สถานที่'] || '').toLowerCase() === marker.place);
+        updateDashboard(filtered);
+      });
+    }
+  });
+}
+
+// ✅ ฟังก์ชันอื่น ๆ
+function toggleBaseMap() { if (currentBase === 'street') { map.removeLayer(street); satellite.addTo(map); currentBase = 'satellite'; } else { map.removeLayer(satellite); street.addTo(map); currentBase = 'street'; }}
+function resetAll() {
+  document.getElementById('startDate').value = '';
+  document.getElementById('endDate').value = '';
+  document.getElementById('searchInput').value = '';
+  renderMarkers(allData);
+  updateDashboard(allData);
+  map.flyTo([13.736717, 100.523186], 6, { animate: true, duration: 2 });
+}
+function filterData() {
+  const startInput = document.getElementById('startDate').value;
+  const endInput = document.getElementById('endDate').value;
+  if (!startInput || !endInput) { alert('กรุณาเลือกวันที่เริ่มต้นและสิ้นสุด'); return; }
+  const start = new Date(startInput);
+  const end = new Date(endInput);
+  const filtered = allData.filter(row => {
+    const date = new Date(convertThaiDateToISO(row['วดป.ที่ลงพื้นที่']));
+    return date >= start && date <= end;
+  });
+  renderMarkers(filtered);
+  updateDashboard(filtered);
+}
+function updateDashboard(data) {
+  if (threatChart) threatChart.destroy();
+  if (touristChart) touristChart.destroy();
+  if (provinceChart) provinceChart.destroy();
+  const threatCounts = { เขียว: 0, เหลือง: 0, แดง: 0, 'รอประเมิน': 0 };
+  const touristDates = {};
+  const provinceCounts = {};
+  data.forEach(row => {
+    const assess = row['ประเมินก่อนลง'];
+    if (assess && threatCounts[assess] !== undefined) { threatCounts[assess]++; } else if (!assess) { threatCounts['รอประเมิน']++; }
+    const isoDate = convertThaiDateToISO(row['วดป.ที่ลงพื้นที่']);
+    const count = parseInt(row['จำนวนนักท่องเที่ยวทั้งหมดในพื้นที่โดยประมาณ ขณะลงพื้นที่']) || 0;
+    if (!touristDates[isoDate]) touristDates[isoDate] = 0;
+    touristDates[isoDate] += count;
+    const province = row['จังหวัด'];
+    if (!provinceCounts[province]) provinceCounts[province] = 0;
+    provinceCounts[province]++;
+  });
+  threatChart = new Chart(document.getElementById('threatChart'), {
+    type: 'pie',
+    data: { labels: ['เขียว', 'เหลือง', 'แดง', 'รอประเมิน'], datasets: [{ data: [threatCounts['เขียว'], threatCounts['เหลือง'], threatCounts['แดง'], threatCounts['รอประเมิน']], backgroundColor: ['green', 'yellow', 'red', 'blue'] }] },
+    options: { onClick: (e, elements) => { if (elements.length > 0) { const clicked = elements[0].index; 
+const label = threatChart.data.labels[clicked];
+let color = '';
+if (label === 'เขียว') color = 'green';
+else if (label === 'เหลือง') color = 'yellow';
+else if (label === 'แดง') color = 'red';
+else color = 'blue';
+ filterMarkersByThreat(color); } }}
+  });
+  const sortedDates = Object.keys(touristDates).sort((a, b) => new Date(a) - new Date(b));
+  const latest10 = sortedDates.slice(-10);
+  const chartLabels = latest10.map(d => formatISOToThaiDate(d));
+  const chartData = latest10.map(d => touristDates[d]);
+
+  touristChart = new Chart(document.getElementById('touristChart'), {
+    type: 'line',
+    data: {
+      labels: chartLabels,
+      datasets: [{
+        label: 'จำนวนนักท่องเที่ยว',
+        data: chartData,
+        borderColor: 'blue',
+        backgroundColor: 'blue',
+        fill: false
+      }]
+    }
+  });
+  provinceChart = new Chart(document.getElementById('provinceChart'), {
+    type: 'bar',
+    data: { labels: Object.keys(provinceCounts), datasets: [{ label: 'จำนวนครั้งลงพื้นที่', data: Object.values(provinceCounts), backgroundColor: 'orange' }] }
+  });
+  document.getElementById('visitCount').innerText = data.length;
+  document.getElementById('placeCount').innerText = new Set(data.map(r => r['สถานที่'])).size;
+  renderTable(data);
+  renderProvinceTable(data);
+}
+function renderTable(data) {
+  const tableContainer = document.getElementById('tableContainer');
+  tableContainer.innerHTML = '';
+  const placeCounts = {};
+  data.forEach(row => { const place = row['สถานที่'] || 'ไม่ระบุ'; placeCounts[place] = (placeCounts[place] || 0) + 1; });
+  const sortedPlaces = Object.entries(placeCounts).sort((a, b) => b[1] - a[1]);
+  let html = '<table><thead><tr><th>สถานที่</th><th>ครั้ง</th></tr></thead><tbody>';
+  sortedPlaces.forEach(([place, count]) => {
+    html += `<tr onclick="filterByPlace('${place}')"><td>${place}</td><td>${count}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  tableContainer.innerHTML = html;
+}
+function filterByPlace(placeName) {
+  const filtered = allData.filter(row => (row['สถานที่'] || '').toLowerCase().includes(placeName.toLowerCase()));
+  renderMarkers(filtered);
+  updateDashboard(filtered);
+  const marker = allMarkers.find(m => m.place.includes(placeName.toLowerCase()));
+  if (marker) { map.flyTo(marker.getLatLng(), 14, { animate: true, duration: 1.5 }); marker.openPopup(); }
+}
+function filterMarkersByThreat(color) {
+  const filteredData = allData.filter(row => {
+    const assess = row['ประเมินก่อนลง'];
+    
+if (color === 'blue') {
+  return !assess || assess === '' || assess === '-' || assess === 'รอประเมิน';
+}
+return assess && (
+  (color === 'green' && assess === 'เขียว') ||
+  (color === 'yellow' && assess === 'เหลือง') ||
+  (color === 'red' && assess === 'แดง')
+);
+
+  });
+  renderMarkers(filteredData);
+  updateDashboard(filteredData);
+}
+document.getElementById('searchInput').addEventListener('keydown', function(event) {
+  if (event.key === 'Enter') {
+    const search = this.value.trim().toLowerCase();
+    if (!search) return;
+    let found = false;
+    allMarkers.forEach(marker => {
+      if (marker.place.includes(search) || marker.province.includes(search)) {
+        map.flyTo(marker.getLatLng(), 14, { animate: true, duration: 1.5 });
+        marker.openPopup();
+        found = true;
+      }
+    });
+    if (!found) {
+      for (const [provinceName, center] of Object.entries(provinceCenters)) {
+        if (provinceName.toLowerCase().includes(search)) {
+          const lat = center[0], lng = center[1];
+          const bounds = L.latLngBounds([lat - 0.5, lng - 0.5], [lat + 0.5, lng + 0.5]);
+          map.fitBounds(bounds, { animate: true, duration: 2 });
+          found = true;
+          break;
+        }
+      }
+    }
+    
+if (!found) {
+  const filtered = allData.filter(row => (row['จังหวัด'] || '').toLowerCase().includes(search));
+  if (filtered.length > 0) {
+    renderMarkers(filtered);
+    updateDashboard(filtered);
+    const first = filtered[0];
+    const province = first['จังหวัด'];
+    if (province && provinceCenters[province]) {
+      const center = provinceCenters[province];
+      map.flyTo(center, 10, { animate: true, duration: 1.5 });
+    }
+  } else {
+    alert('ไม่พบสถานที่หรือจังหวัดที่ค้นหา');
+  }
+}
+
+  }
+});
+
+document.getElementById('agencyInput').addEventListener('keydown', function(event) {
+  if (event.key === 'Enter') {
+    filterData();
+  }
+});
+
+const originalFilterData = filterData;
+filterData = function() {
+  const agencyText = (document.getElementById('agencyInput').value || '').toLowerCase();
+  const startInput = document.getElementById('startDate').value;
+  const endInput = document.getElementById('endDate').value;
+
+  const filtered = allData.filter(row => {
+    const agency = (row['หน่วยบันทึกข้อมูล'] || '').toLowerCase();
+    const matchAgency = agency.includes(agencyText);
+    let matchDate = true;
+    if (startInput && endInput) {
+      const date = new Date(convertThaiDateToISO(row['วดป.ที่ลงพื้นที่']));
+      const start = new Date(startInput);
+      const end = new Date(endInput);
+      matchDate = date >= start && date <= end;
+    }
+    return matchAgency && matchDate;
+  });
+
+  renderMarkers(filtered);
+  updateDashboard(filtered);
+};
+
+const originalResetAll = resetAll;
+resetAll = function() {
+  document.getElementById('startDate').value = '';
+  document.getElementById('endDate').value = '';
+  document.getElementById('searchInput').value = '';
+  document.getElementById('agencyInput').value = '';
+  renderMarkers(allData);
+  updateDashboard(allData);
+  map.flyTo([13.736717, 100.523186], 6, { animate: true, duration: 2 });
+}
+
+
+
+
+function renderProvinceTable(data) {
+  const provinceCounts = {};
+  data.forEach(row => {
+    const province = row['จังหวัด'] || 'ไม่ระบุ';
+    if (!provinceCounts[province]) provinceCounts[province] = 0;
+    provinceCounts[province]++;
+  });
+
+  const sorted = Object.entries(provinceCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+
+  const tbody = document.querySelector("#provinceTable tbody");
+  tbody.innerHTML = '';
+  sorted.forEach(([province, count]) => {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td style="padding:6px; border:1px solid #ccc; cursor:pointer; color:#007bff;">${province}</td>
+      <td style="padding:6px; border:1px solid #ccc;">${count}</td>`;
+    row.querySelector("td").addEventListener("click", () => {
+      const filtered = allData.filter(r => (r['จังหวัด'] || '').toLowerCase() === province.toLowerCase());
+      renderMarkers(filtered);
+      updateDashboard(filtered);
+      if (provinceCenters[province]) {
+        const [lat, lng] = provinceCenters[province];
+        map.flyTo([lat, lng], 10, { animate: true, duration: 1.5 });
+      }
+    });
+    tbody.appendChild(row);
+  });
+}
+</script>
+</body>
+</html>
